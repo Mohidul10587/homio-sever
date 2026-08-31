@@ -3,7 +3,6 @@ import { GeminiProvider } from './gemini.provider';
 import { PromptBuilderService } from './prompt-builder.service';
 import { OutputValidatorService } from './output-validator.service';
 import { AnalysisOrchestratorService } from './analysis-orchestrator.service';
-import { AIProvider } from './ai-provider.interface';
 
 const AIProviderFactory = {
   provide: 'AIProvider',

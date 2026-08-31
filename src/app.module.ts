@@ -10,6 +10,7 @@ import { AnalysisModule } from './analysis/analysis.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { FollowUpModule } from './followup/followup.module';
 import { AdminModule } from './admin/admin.module';
+import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
 
 @Module({
@@ -26,6 +27,7 @@ import { AuditModule } from './audit/audit.module';
     DashboardModule,
     FollowUpModule,
     AdminModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

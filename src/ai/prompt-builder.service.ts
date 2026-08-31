@@ -13,7 +13,15 @@ export class PromptBuilderService {
     return buildStep2Prompt(mainDisease);
   }
 
-  buildStep3Prompt(characteristicSymptoms: any[], peculiarSymptoms: any[], top5Remedies: any[]): string {
-    return buildStep3Prompt(characteristicSymptoms, peculiarSymptoms, top5Remedies);
+  buildStep3Prompt(
+    characteristicSymptoms: any[],
+    peculiarSymptoms: any[],
+    top5Remedies: any[],
+  ): string {
+    return buildStep3Prompt(
+      characteristicSymptoms,
+      peculiarSymptoms,
+      top5Remedies,
+    );
   }
 }

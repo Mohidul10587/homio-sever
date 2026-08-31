@@ -56,19 +56,22 @@ export class AnalysisOrchestratorService {
       const caseSummary = analysis.caseSummary || '';
 
       this.logger.log(`Starting Step 1 for visit ${visitId}`);
-      const step1Result = await this.runStep1(analysis.id, caseSummary, caseData);
+      const step1Result = await this.runStep1(
+        analysis.id,
+        caseSummary,
+        caseData,
+      );
       this.logger.log(`Step 1 completed for visit ${visitId}`);
 
       this.logger.log(`Starting Step 2 for visit ${visitId}`);
-      const step2Result = await this.runStep2(analysis.id, caseData.mainDisease);
+      const step2Result = await this.runStep2(
+        analysis.id,
+        caseData.mainDisease,
+      );
       this.logger.log(`Step 2 completed for visit ${visitId}`);
 
       this.logger.log(`Starting Step 3 for visit ${visitId}`);
-      const step3Result = await this.runStep3(
-        analysis.id,
-        step1Result,
-        step2Result,
-      );
+      await this.runStep3(analysis.id, step1Result, step2Result);
       this.logger.log(`Step 3 completed for visit ${visitId}`);
 
       const processingTime = Date.now() - startTime;
@@ -97,7 +100,8 @@ export class AnalysisOrchestratorService {
       return this.getAnalysisResult(analysis.id);
     } catch (error) {
       const processingTime = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
 
       await this.prisma.analysis.update({
         where: { id: analysis.id },
@@ -125,7 +129,11 @@ export class AnalysisOrchestratorService {
     }
   }
 
-  private async runStep1(analysisId: string, caseSummary: string, caseData: Record<string, any>) {
+  private async runStep1(
+    analysisId: string,
+    caseSummary: string,
+    caseData: Record<string, any>,
+  ) {
     const prompt = this.promptBuilder.buildStep1Prompt(caseSummary, caseData);
     const response = await this.aiProvider.generateContent(prompt);
 
@@ -141,11 +149,16 @@ export class AnalysisOrchestratorService {
     await this.prisma.analysisStep1.create({
       data: {
         analysisId,
-        importantSymptoms: validated.importantSymptoms as unknown as Prisma.InputJsonValue,
-        uniqueSymptoms: validated.uniqueSymptoms as unknown as Prisma.InputJsonValue,
-        characteristicSymptoms: validated.characteristicSymptoms as unknown as Prisma.InputJsonValue,
-        peculiarSymptoms: validated.peculiarSymptoms as unknown as Prisma.InputJsonValue,
-        symptomPriority: validated.symptomPriority as unknown as Prisma.InputJsonValue,
+        importantSymptoms:
+          validated.importantSymptoms as unknown as Prisma.InputJsonValue,
+        uniqueSymptoms:
+          validated.uniqueSymptoms as unknown as Prisma.InputJsonValue,
+        characteristicSymptoms:
+          validated.characteristicSymptoms as unknown as Prisma.InputJsonValue,
+        peculiarSymptoms:
+          validated.peculiarSymptoms as unknown as Prisma.InputJsonValue,
+        symptomPriority:
+          validated.symptomPriority as unknown as Prisma.InputJsonValue,
         rawAiResponse: response.content,
       },
     });
@@ -220,10 +233,14 @@ export class AnalysisOrchestratorService {
       parts.push(`শুরুর ধরন: ${caseData.onset}`);
     }
     if (caseData.aggravation?.length > 0) {
-      parts.push(`যেসব বিষয়ে লক্ষণ বেড়ে যায়: ${caseData.aggravation.join(', ')}`);
+      parts.push(
+        `যেসব বিষয়ে লক্ষণ বেড়ে যায়: ${caseData.aggravation.join(', ')}`,
+      );
     }
     if (caseData.amelioration?.length > 0) {
-      parts.push(`যেসব বিষয়ে লক্ষণ কমে যায়: ${caseData.amelioration.join(', ')}`);
+      parts.push(
+        `যেসব বিষয়ে লক্ষণ কমে যায়: ${caseData.amelioration.join(', ')}`,
+      );
     }
     if (caseData.mentalState?.length > 0) {
       parts.push(`মানসিক অবস্থা: ${caseData.mentalState.join(', ')}`);
@@ -240,7 +257,12 @@ export class AnalysisOrchestratorService {
   async getAnalysisResult(analysisId: string, doctorId?: string) {
     const result = await this.prisma.analysis.findUnique({
       where: { id: analysisId },
-      include: { step1: true, step2: true, step3: true, visit: { include: { patient: true } } },
+      include: {
+        step1: true,
+        step2: true,
+        step3: true,
+        visit: { include: { patient: true } },
+      },
     });
     if (!result) throw new NotFoundException('Analysis not found');
     if (doctorId && result.visit?.patient.doctorId !== doctorId) {
@@ -252,7 +274,12 @@ export class AnalysisOrchestratorService {
   async getAnalysisByVisit(visitId: string, doctorId?: string) {
     const result = await this.prisma.analysis.findUnique({
       where: { visitId },
-      include: { step1: true, step2: true, step3: true, visit: { include: { patient: true } } },
+      include: {
+        step1: true,
+        step2: true,
+        step3: true,
+        visit: { include: { patient: true } },
+      },
     });
     if (!result) throw new NotFoundException('Analysis not found');
     if (doctorId && result.visit?.patient.doctorId !== doctorId) {
@@ -264,7 +291,11 @@ export class AnalysisOrchestratorService {
   async saveDoctorDecision(
     analysisId: string,
     doctorId: string,
-    decision: { selectedRemedy?: string; prescriptionNotes?: string; doctorNotes?: string },
+    decision: {
+      selectedRemedy?: string;
+      prescriptionNotes?: string;
+      doctorNotes?: string;
+    },
   ) {
     const analysis = await this.getAnalysisResult(analysisId, doctorId);
 
