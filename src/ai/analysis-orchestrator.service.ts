@@ -5,6 +5,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  HttpException,
 } from '@nestjs/common';
 import type { AIProvider } from './ai-provider.interface';
 import { Prisma } from '@prisma/client';
@@ -56,18 +57,11 @@ export class AnalysisOrchestratorService {
       const caseSummary = analysis.caseSummary || '';
 
       this.logger.log(`Starting Step 1 for visit ${visitId}`);
-      const step1Result = await this.runStep1(
-        analysis.id,
-        caseSummary,
-        caseData,
-      );
+      const step1Result = await this.runStep1(analysis.id, caseSummary, caseData);
       this.logger.log(`Step 1 completed for visit ${visitId}`);
 
       this.logger.log(`Starting Step 2 for visit ${visitId}`);
-      const step2Result = await this.runStep2(
-        analysis.id,
-        caseData.mainDisease,
-      );
+      const step2Result = await this.runStep2(analysis.id, caseData.mainDisease);
       this.logger.log(`Step 2 completed for visit ${visitId}`);
 
       this.logger.log(`Starting Step 3 for visit ${visitId}`);
@@ -125,8 +119,41 @@ export class AnalysisOrchestratorService {
         },
       });
 
-      throw error;
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      throw this.toAnalysisError(error, 0);
     }
+  }
+
+  private toAnalysisError(error: unknown, step: number): never {
+    let message = 'Analysis failed';
+    let errorType = 'UNKNOWN_ERROR';
+
+    if (error instanceof Error) {
+      message = error.message;
+    }
+
+    if (error instanceof BadRequestException) {
+      errorType = 'VALIDATION_ERROR';
+    } else if (message.includes('Gemini API error')) {
+      errorType = 'AI_API_ERROR';
+    } else if (message.includes('Failed to parse')) {
+      errorType = 'AI_PARSE_ERROR';
+    } else if (
+      message.includes('prisma') ||
+      message.includes('database') ||
+      message.includes('connect')
+    ) {
+      errorType = 'DATABASE_ERROR';
+    }
+
+    throw new BadRequestException({
+      message,
+      step,
+      errorType,
+    });
   }
 
   private async runStep1(
@@ -134,91 +161,112 @@ export class AnalysisOrchestratorService {
     caseSummary: string,
     caseData: Record<string, any>,
   ) {
-    const prompt = this.promptBuilder.buildStep1Prompt(caseSummary, caseData);
-    const response = await this.aiProvider.generateContent(prompt);
-
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(response.content);
-    } catch {
-      throw new Error('Failed to parse Step 1 AI response as JSON');
+      const prompt = this.promptBuilder.buildStep1Prompt(caseSummary, caseData);
+      const response = await this.aiProvider.generateContent(prompt);
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(response.content);
+      } catch {
+        throw new Error('Failed to parse Step 1 AI response as JSON');
+      }
+
+      const validated = this.validator.validateStep1(parsed);
+
+      await this.prisma.analysisStep1.create({
+        data: {
+          analysisId,
+          importantSymptoms:
+            validated.importantSymptoms as unknown as Prisma.InputJsonValue,
+          uniqueSymptoms:
+            validated.uniqueSymptoms as unknown as Prisma.InputJsonValue,
+          characteristicSymptoms:
+            validated.characteristicSymptoms as unknown as Prisma.InputJsonValue,
+          peculiarSymptoms:
+            validated.peculiarSymptoms as unknown as Prisma.InputJsonValue,
+          symptomPriority:
+            validated.symptomPriority as unknown as Prisma.InputJsonValue,
+          rawAiResponse: response.content,
+        },
+      });
+
+      return validated;
+    } catch (error) {
+      this.logger.error(
+        `Step 1 failed: ${error instanceof Error ? error.message : error}`,
+      );
+      throw this.toAnalysisError(error, 1);
     }
-
-    const validated = this.validator.validateStep1(parsed);
-
-    await this.prisma.analysisStep1.create({
-      data: {
-        analysisId,
-        importantSymptoms:
-          validated.importantSymptoms as unknown as Prisma.InputJsonValue,
-        uniqueSymptoms:
-          validated.uniqueSymptoms as unknown as Prisma.InputJsonValue,
-        characteristicSymptoms:
-          validated.characteristicSymptoms as unknown as Prisma.InputJsonValue,
-        peculiarSymptoms:
-          validated.peculiarSymptoms as unknown as Prisma.InputJsonValue,
-        symptomPriority:
-          validated.symptomPriority as unknown as Prisma.InputJsonValue,
-        rawAiResponse: response.content,
-      },
-    });
-
-    return validated;
   }
 
   private async runStep2(analysisId: string, mainDisease: string) {
-    const prompt = this.promptBuilder.buildStep2Prompt(mainDisease);
-    const response = await this.aiProvider.generateContent(prompt);
-
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(response.content);
-    } catch {
-      throw new Error('Failed to parse Step 2 AI response as JSON');
+      const prompt = this.promptBuilder.buildStep2Prompt(mainDisease);
+      const response = await this.aiProvider.generateContent(prompt);
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(response.content);
+      } catch {
+        throw new Error('Failed to parse Step 2 AI response as JSON');
+      }
+
+      const validated = this.validator.validateStep2(parsed);
+
+      await this.prisma.analysisStep2.create({
+        data: {
+          analysisId,
+          mainDisease: validated.mainDisease,
+          remedies: validated.remedies as unknown as Prisma.InputJsonValue,
+          rawAiResponse: response.content,
+        },
+      });
+
+      return validated;
+    } catch (error) {
+      this.logger.error(
+        `Step 2 failed: ${error instanceof Error ? error.message : error}`,
+      );
+      throw this.toAnalysisError(error, 2);
     }
-
-    const validated = this.validator.validateStep2(parsed);
-
-    await this.prisma.analysisStep2.create({
-      data: {
-        analysisId,
-        mainDisease: validated.mainDisease,
-        remedies: validated.remedies as unknown as Prisma.InputJsonValue,
-        rawAiResponse: response.content,
-      },
-    });
-
-    return validated;
   }
 
   private async runStep3(analysisId: string, step1: any, step2: any) {
-    const step2RemedyNames = step2.remedies.map((r: any) => r.name);
-
-    const prompt = this.promptBuilder.buildStep3Prompt(
-      step1.characteristicSymptoms,
-      step1.peculiarSymptoms,
-      step2.remedies,
-    );
-    const response = await this.aiProvider.generateContent(prompt);
-
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(response.content);
-    } catch {
-      throw new Error('Failed to parse Step 3 AI response as JSON');
+      const step2RemedyNames = step2.remedies.map((r: any) => r.name);
+
+      const prompt = this.promptBuilder.buildStep3Prompt(
+        step1.characteristicSymptoms,
+        step1.peculiarSymptoms,
+        step2.remedies,
+      );
+      const response = await this.aiProvider.generateContent(prompt);
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(response.content);
+      } catch {
+        throw new Error('Failed to parse Step 3 AI response as JSON');
+      }
+
+      const validated = this.validator.validateStep3(parsed, step2RemedyNames);
+
+      await this.prisma.analysisStep3.create({
+        data: {
+          analysisId,
+          top3: validated.top3 as unknown as Prisma.InputJsonValue,
+          rawAiResponse: response.content,
+        },
+      });
+
+      return validated;
+    } catch (error) {
+      this.logger.error(
+        `Step 3 failed: ${error instanceof Error ? error.message : error}`,
+      );
+      throw this.toAnalysisError(error, 3);
     }
-
-    const validated = this.validator.validateStep3(parsed, step2RemedyNames);
-
-    await this.prisma.analysisStep3.create({
-      data: {
-        analysisId,
-        top3: validated.top3 as unknown as Prisma.InputJsonValue,
-        rawAiResponse: response.content,
-      },
-    });
-
-    return validated;
   }
 
   private buildCaseSummary(caseData: any): string {
